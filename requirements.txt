@@ -1,0 +1,62 @@
+
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# LLM Integration
+groq>=0.4.0
+openai>=1.13.3,<2.0.0
+
+# CrewAI for Multi-Agent
+crewai>=0.22.0
+crewai-tools>=0.2.0
+
+# Embeddings and Vector Store
+sentence-transformers>=5.1.2
+huggingface-hub>=0.36.0
+chromadb>=0.4.0
+torch>=2.1.0
+
+# Document Processing
+pypdf>=4.0.0
+PyMuPDF>=1.23.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+python-pptx>=0.6.21
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# OCR Support
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Web Search
+duckduckgo-search>=4.0
+aiohttp>=3.9.0
+httpx>=0.26.0
+
+# Configuration
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+
+# Utilities
+numpy>=1.24.0
+tqdm>=4.66.0
+tenacity>=8.2.0
+
+# Async Support
+asyncio-throttle>=1.0.0
+
+# Testing (optional)
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+
+# Development (optional)
+black>=24.0.0
+isort>=5.13.0
+flake8>=7.0.0
+mypy>=1.8.0
+
