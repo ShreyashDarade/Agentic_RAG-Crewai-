@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 
 class LLMProvider(Enum):
     """Supported LLM providers."""
-    GROQ = "groq"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
+    OPENAI = "openai"  # Primary provider
+    ANTHROPIC = "anthropic"  # Future support
+    GROQ = "groq"  # @deprecated - use OPENAI instead
 
 
 @dataclass
@@ -65,6 +65,8 @@ class LLMResponse:
     finish_reason: Optional[str] = None
     raw_response: Optional[Any] = None
     latency_ms: float = 0.0
+    function_call: Optional[Dict[str, Any]] = None  # For function calling
+    tool_calls: Optional[List[Dict[str, Any]]] = None  # For tool calling
     
     @property
     def prompt_tokens(self) -> int:

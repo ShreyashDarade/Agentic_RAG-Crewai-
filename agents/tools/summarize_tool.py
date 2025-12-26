@@ -1,3 +1,9 @@
+"""
+Summarize Tool - Production Grade (OpenAI)
+
+Tools for text summarization, key point extraction, and document comparison.
+"""
+
 import logging
 from typing import Any, Optional, Type
 
@@ -28,9 +34,7 @@ class SummarizeInput(BaseModel):
 
 class SummarizeTool(BaseTool):
     """
-    Tool for summarizing text content.
-    
-    Uses LLM to generate concise summaries of longer texts.
+    Tool for summarizing text content using OpenAI.
     """
     
     name: str = "summarize"
@@ -46,13 +50,13 @@ class SummarizeTool(BaseTool):
     
     _llm_client: Any = None
     _api_key: Optional[str] = None
-    _model: str = "openai/gpt-oss-120b"
+    _model: str = "gpt-4o-mini"
     
     def __init__(
         self,
         llm_client: Any = None,
         api_key: Optional[str] = None,
-        model: str = "openai/gpt-oss-120b",
+        model: str = "gpt-4o-mini",
         **kwargs
     ):
         """
@@ -60,7 +64,7 @@ class SummarizeTool(BaseTool):
         
         Args:
             llm_client: LLM client instance
-            api_key: API key for LLM
+            api_key: API key for OpenAI
             model: Model name to use
             **kwargs: Additional arguments
         """
@@ -70,25 +74,25 @@ class SummarizeTool(BaseTool):
         self._model = model
     
     def _initialize_llm(self) -> None:
-        """Initialize LLM client if not provided."""
+        """Initialize OpenAI LLM client if not provided."""
         if self._llm_client is None:
             try:
                 import os
-                from ...llm import GroqClient, LLMConfig, LLMProvider
+                from ...llm import OpenAIClient, LLMConfig, LLMProvider
                 
-                api_key = self._api_key or os.getenv("GROQ_API_KEY")
+                api_key = self._api_key or os.getenv("OPENAI_API_KEY")
                 if not api_key:
-                    raise ValueError("GROQ_API_KEY not found")
+                    raise ValueError("OPENAI_API_KEY not found")
                 
                 config = LLMConfig(
-                    provider=LLMProvider.GROQ,
+                    provider=LLMProvider.OPENAI,
                     model=self._model,
                     api_key=api_key,
                     temperature=0.3,
                     max_tokens=1000
                 )
-                self._llm_client = GroqClient(config)
-                logger.info(f"Initialized LLM client with model: {self._model}")
+                self._llm_client = OpenAIClient(config)
+                logger.info(f"Initialized OpenAI client with model: {self._model}")
                 
             except Exception as e:
                 logger.error(f"Failed to initialize LLM: {e}")
@@ -201,7 +205,7 @@ class KeyPointExtractionInput(BaseModel):
 
 class KeyPointExtractionTool(BaseTool):
     """
-    Tool for extracting key points from text.
+    Tool for extracting key points from text using OpenAI.
     """
     
     name: str = "extract_key_points"
@@ -227,19 +231,19 @@ class KeyPointExtractionTool(BaseTool):
     def _initialize_llm(self) -> None:
         if self._llm_client is None:
             import os
-            from ...llm import GroqClient, LLMConfig, LLMProvider
+            from ...llm import OpenAIClient, LLMConfig, LLMProvider
             
-            api_key = self._api_key or os.getenv("GROQ_API_KEY")
+            api_key = self._api_key or os.getenv("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("GROQ_API_KEY not found")
+                raise ValueError("OPENAI_API_KEY not found")
             
             config = LLMConfig(
-                provider=LLMProvider.GROQ,
-                model="openai/gpt-oss-120b",
+                provider=LLMProvider.OPENAI,
+                model="gpt-4o-mini",
                 api_key=api_key,
                 temperature=0.2
             )
-            self._llm_client = GroqClient(config)
+            self._llm_client = OpenAIClient(config)
     
     def _run(self, text: str, num_points: int = 5) -> str:
         """Extract key points from text."""
@@ -314,7 +318,7 @@ class CompareDocumentsInput(BaseModel):
 
 class CompareDocumentsTool(BaseTool):
     """
-    Tool for comparing two text documents.
+    Tool for comparing two text documents using OpenAI.
     """
     
     name: str = "compare_documents"
@@ -335,19 +339,19 @@ class CompareDocumentsTool(BaseTool):
     def _initialize_llm(self) -> None:
         if self._llm_client is None:
             import os
-            from ...llm import GroqClient, LLMConfig, LLMProvider
+            from ...llm import OpenAIClient, LLMConfig, LLMProvider
             
-            api_key = self._api_key or os.getenv("GROQ_API_KEY")
+            api_key = self._api_key or os.getenv("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("GROQ_API_KEY not found")
+                raise ValueError("OPENAI_API_KEY not found")
             
             config = LLMConfig(
-                provider=LLMProvider.GROQ,
-                model="openai/gpt-oss-120b",
+                provider=LLMProvider.OPENAI,
+                model="gpt-4o-mini",
                 api_key=api_key,
                 temperature=0.2
             )
-            self._llm_client = GroqClient(config)
+            self._llm_client = OpenAIClient(config)
     
     def _run(
         self,
@@ -411,4 +415,3 @@ def create_summarize_tool(
         Configured SummarizeTool
     """
     return SummarizeTool(llm_client=llm_client, api_key=api_key)
-

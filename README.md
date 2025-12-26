@@ -1,234 +1,349 @@
-# DAY10 - Multi-Agent RAG System
+# 🚀 Agentic RAG System with CrewAI
 
-A production-ready, microservices-style Multi-Agent RAG (Retrieval-Augmented Generation) system using CrewAI, Groq, ChromaDB, and FastAPI.
+A **production-grade Retrieval-Augmented Generation (RAG)** system built with multi-agent orchestration using **CrewAI**, **OpenAI GPT-4**, and **Milvus Cloud**.
 
-## 🏗️ Architecture
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-orange.svg)
+![Milvus](https://img.shields.io/badge/Milvus-Cloud-purple.svg)
+![CrewAI](https://img.shields.io/badge/CrewAI-Latest-red.svg)
+
+## ✨ Key Features
+
+### 🤖 Multi-Agent Architecture (CrewAI)
+
+| Agent          | Role                  | Capabilities                                                       |
+| -------------- | --------------------- | ------------------------------------------------------------------ |
+| **Supervisor** | Query Planning        | Deep intent analysis, multi-step decomposition, execution planning |
+| **Retriever**  | Information Retrieval | Multi-modal search, cross-reference expansion, source attribution  |
+| **Generator**  | Response Synthesis    | Context-aware generation, citation integration, structured output  |
+| **Feedback**   | Quality Assurance     | Validation, scoring, improvement suggestions                       |
+
+### 📄 Advanced Document Processing
+
+- **Multi-format Support**: PDF, DOCX, XLSX, PPTX, HTML, Markdown, images
+- **EasyOCR**: Multilingual OCR (English, Hindi, German, French, Spanish+)
+- **spaCy NLP**: Entity extraction, keyword detection, text cleanup
+- **Cross-Reference Linking**: Automatic linking between text ↔ tables ↔ images
+
+### 🔍 State-of-the-Art Retrieval
+
+| Feature                      | Description                                   |
+| ---------------------------- | --------------------------------------------- |
+| **HNSW Index**               | High-performance vector search (Milvus Cloud) |
+| **RRF Fusion**               | Combines dense + BM25 for hybrid search       |
+| **Cross-Encoder Re-ranking** | Improved relevance with ms-marco model        |
+| **MMR Diversity**            | Prevents redundant results                    |
+| **Multi-Query Retrieval**    | Query variations for better coverage          |
+
+### 💾 Production Infrastructure
+
+- **LLM**: OpenAI GPT-4o-mini (with function calling)
+- **Embeddings**: OpenAI text-embedding-3-small (1536 dimensions)
+- **Vector Store**: Milvus Cloud (Zilliz) with HNSW indexing
+- **Streaming**: Real-time response generation
+
+## 📁 Project Structure
 
 ```
-DAY10/
-├── agents/                      # CrewAI-based agent classes
-│   ├── supervisor_agent.py      # Query planning and tool selection
-│   ├── retriever_agent.py       # Document and web search
-│   ├── generator_agent.py       # Answer synthesis
-│   ├── feedback_agent.py        # Quality assurance
-│   └── tools/                   # Agent tools
-│       ├── chroma_tool.py       # ChromaDB search
-│       ├── online_search_tool.py # Web search
-│       └── summarize_tool.py    # Text summarization
-├── orchestrator/                # Multi-agent coordination
-│   ├── crew_manager.py          # Workflow orchestration
-│   ├── memory_store.py          # Conversation memory
-│   └── trace_logger.py          # Execution tracing
-├── llm/                         # LLM abstraction layer
-│   ├── base_llm.py              # LLM interface
-│   ├── groq_client.py           # Groq implementation
-│   └── prompt_templates/        # Agent prompts
-├── embeddings/                  # Vector embeddings
-│   ├── embedder.py              # Sentence transformers
-│   ├── vector_store.py          # ChromaDB wrapper
-│   └── chunk_tags.py            # Chunk tagging
-├── retriever/                   # Information retrieval
-│   ├── chroma_retriever.py      # Local search (BM25 + dense)
-│   ├── web_retriever.py         # Web search
-│   └── hybrid_retriever.py      # Combined retrieval
-├── data_pipeline/               # Document processing
-│   ├── file_loader.py           # Universal file parsing
-│   ├── ocr_processor.py         # OCR for images/PDFs
-│   ├── metadata_filter.py       # Document filtering
-│   ├── chunker.py               # Text chunking
-│   └── ingestion_pipeline.py    # Full ingestion flow
-├── api/                         # FastAPI application
-│   ├── routes/
-│   │   ├── query.py             # Query endpoints
-│   │   └── ingest.py            # Ingestion endpoints
-│   ├── models/                  # Pydantic schemas
-│   └── main.py                  # API entry point
-├── config/                      # Configuration
-│   ├── config.yaml              # Main config
-│   ├── crew_config.yaml         # Agent config
-│   └── env_example.txt          # Environment template
-├── Dockerfile                   # Container definition
-├── docker-compose.yml           # Docker composition
-└── requirements.txt             # Python dependencies
+Agentic_RAG-Crewai/
+├── api/                      # FastAPI application
+│   ├── main.py              # App entry point
+│   ├── models/              # Pydantic models
+│   └── routes/              # API routes
+├── agents/                   # CrewAI agents
+│   ├── supervisor_agent.py  # Query analysis & planning
+│   ├── retriever_agent.py   # Multi-modal retrieval
+│   ├── generator_agent.py   # Response synthesis
+│   ├── feedback_agent.py    # Quality validation
+│   └── tools/               # Agent tools
+│       ├── milvus_tool.py   # Milvus search tool
+│       └── online_search_tool.py
+├── config/
+│   ├── config.yaml          # Main configuration
+│   ├── crew_config.yaml     # Agent configurations
+│   └── .env                 # Environment variables
+├── data_pipeline/
+│   ├── chunker.py           # Cross-reference chunking
+│   ├── ocr_processor.py     # EasyOCR + spaCy
+│   ├── file_loader.py       # Multi-format loader
+│   └── ingestion_pipeline.py
+├── embeddings/
+│   ├── openai_embedder.py   # OpenAI embeddings
+│   └── milvus_store.py      # Milvus Cloud store
+├── llm/
+│   ├── openai_client.py     # OpenAI GPT client
+│   └── base_llm.py
+├── retriever/
+│   └── advanced_retriever.py # RRF, re-ranking, MMR
+├── orchestrator/
+│   ├── crew_manager.py      # Agent orchestration
+│   ├── memory_store.py
+│   └── trace_logger.py
+├── run.py
+├── requirements.txt
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.10+
-- Docker (optional)
-- Groq API key
+- Python 3.11+
+- OpenAI API Key
+- Milvus Cloud Account (Zilliz Cloud)
 
-### Installation
-
-1. **Clone and navigate:**
-   ```bash
-   cd Agentic_RAG-Crewai-
-   ```
-
-2. **Create virtual environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or
-   .\venv\Scripts\activate  # Windows
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment:**
-   ```bash
-   # Copy and edit the environment template
-   cp config/env_example.txt .env
-   # Edit .env with your API keys
-   ```
-
-5. **Run the API:**
-   ```bash
-   uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-### Docker Deployment
+### 1. Clone and Setup
 
 ```bash
-# Build and run
-docker-compose up -d
+git clone https://github.com/yourusername/Agentic_RAG-Crewai.git
+cd Agentic_RAG-Crewai
 
-# View logs
-docker-compose logs -f api
+# Create virtual environment
+python -m venv venv
+.\venv\Scripts\activate  # Windows
+source venv/bin/activate  # Linux/Mac
 
-# Stop
-docker-compose down
+# Install dependencies
+pip install -r requirements.txt
+
+# Download spaCy model
+python -m spacy download en_core_web_sm
+```
+
+### 2. Configure Environment
+
+```bash
+# Copy environment template
+cp config/.env.example config/.env
+```
+
+Edit `config/.env`:
+
+```env
+# Required: OpenAI
+OPENAI_API_KEY=sk-your-openai-key-here
+
+# Required: Milvus Cloud (Zilliz)
+MILVUS_URI=https://your-cluster.api.gcp-us-west1.zillizcloud.com
+MILVUS_TOKEN=your-milvus-api-token
+
+# Optional: Web Search
+SERPER_API_KEY=
+TAVILY_API_KEY=
+```
+
+### 3. Get Milvus Cloud Credentials
+
+1. Go to [cloud.zilliz.com](https://cloud.zilliz.com)
+2. Create a free cluster
+3. Get your **Public Endpoint** (URI)
+4. Create an **API Key** (Token)
+5. Add to your `.env` file
+
+### 4. Run the Application
+
+```bash
+python run.py
+```
+
+### 5. Access the API
+
+```
+API: http://localhost:8000
+Docs: http://localhost:8000/docs
+Health: http://localhost:8000/health
 ```
 
 ## 📡 API Endpoints
 
 ### Query Processing
 
-- `POST /api/v1/agent_query` - Process query through multi-agent system
-- `POST /api/v1/search` - Direct search without full pipeline
-- `GET /api/v1/trace/{trace_id}` - Get execution trace
-- `GET /api/v1/history` - Get conversation history
+```bash
+# Multi-agent query processing
+POST /api/v1/agent_query
+Content-Type: application/json
+
+{
+  "query": "What are the key findings in the Q3 report?",
+  "use_web_search": false
+}
+```
 
 ### Document Ingestion
 
-- `POST /api/v1/ingest` - Ingest documents from directory
-- `POST /api/v1/ingest/file` - Ingest single file
-- `POST /api/v1/ingest/upload` - Upload and ingest file
-- `GET /api/v1/ingest/status` - Get ingestion status
-- `GET /api/v1/ingest/files` - List ingested files
-
-### Health & Status
-
-- `GET /health` - Health check
-- `GET /status` - Detailed status
-
-## 📖 Usage Examples
-
-### Query Example
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/agent_query" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What are the key features of Python 3.12?",
-    "include_sources": true,
-    "include_trace": true
-  }'
-```
-
-### Ingestion Example
-
 ```bash
 # Ingest from directory
-curl -X POST "http://localhost:8000/api/v1/ingest" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "directory": "./data/raw",
-    "force": false,
-    "recursive": true
-  }'
+POST /api/v1/ingest
+{
+  "directory": "./data/raw"
+}
 
 # Upload file
-curl -X POST "http://localhost:8000/api/v1/ingest/upload" \
-  -F "file=@document.pdf"
+POST /api/v1/ingest/upload
+Content-Type: multipart/form-data
+file: <your-document>
 ```
 
-## ⚙️ Configuration
+### System Health
 
-### Environment Variables
+```bash
+GET /health
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GROQ_API_KEY` | Groq API key | Yes |
-| `OPENAI_API_KEY` | OpenAI API key (optional) | No |
-| `SERPER_API_KEY` | Serper.dev API key (optional) | No |
-| `TAVILY_API_KEY` | Tavily API key (optional) | No |
-| `APP_ENV` | Environment (development/production) | No |
-| `DEBUG` | Enable debug mode | No |
-| `LOG_LEVEL` | Logging level | No |
+# Response
+{
+  "status": "healthy",
+  "version": "2.0.0",
+  "components": {
+    "llm": {"status": "healthy", "provider": "openai"},
+    "vector_store": {
+      "status": "healthy",
+      "provider": "milvus_cloud",
+      "index_type": "HNSW",
+      "document_count": 1250
+    }
+  }
+}
+```
 
-### Config Files
+## 🏗️ Architecture
 
-- `config/config.yaml` - Main application configuration
-- `config/crew_config.yaml` - Agent and workflow configuration
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     FastAPI Layer                            │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   CrewAI Orchestrator                        │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐ │
+│  │ Supervisor│──│ Retriever │──│ Generator │──│ Feedback  │ │
+│  │   Agent   │  │   Agent   │  │   Agent   │  │   Agent   │ │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  OpenAI GPT-4   │  │  Milvus Cloud   │  │   Web Search    │
+│  (LLM Engine)   │  │  (HNSW Index)   │  │   (Optional)    │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+```
 
-## 🔧 Features
+## 🔄 Retrieval Pipeline
 
-### Multi-Agent Pipeline
+```
+Query → Multi-Query Generation
+            │
+            ▼
+    ┌───────┴───────┐
+    ▼               ▼
+Dense Search    BM25 Search
+(HNSW)          (Keywords)
+    │               │
+    └───────┬───────┘
+            ▼
+      RRF Fusion (k=60)
+            │
+            ▼
+   Cross-Encoder Re-ranking
+            │
+            ▼
+    MMR Diversity (λ=0.5)
+            │
+            ▼
+      Final Results
+```
 
-1. **Supervisor Agent** - Analyzes queries, creates execution plans
-2. **Retriever Agent** - Searches documents and web
-3. **Generator Agent** - Synthesizes answers
-4. **Feedback Agent** - Validates and improves responses
+## 📊 HNSW Index Configuration
 
-### Document Processing
+The system uses HNSW (Hierarchical Navigable Small World) indexing for optimal search performance:
 
-- **Supported Formats:** PDF, DOCX, DOC, TXT, MD, HTML, CSV, XLSX, PPTX, Images
-- **OCR:** Automatic OCR for scanned documents
-- **Chunking:** Recursive, semantic, and fixed-size strategies
-- **Deduplication:** Tracks processed files to avoid reprocessing
+| Parameter        | Value  | Description                                    |
+| ---------------- | ------ | ---------------------------------------------- |
+| `M`              | 32     | Graph connectivity (higher = better recall)    |
+| `efConstruction` | 360    | Build-time quality (higher = better index)     |
+| `efSearch`       | 128    | Search-time quality (higher = better accuracy) |
+| `metric_type`    | COSINE | Similarity metric for normalized embeddings    |
 
-### Retrieval
+## 🐳 Docker Deployment
 
-- **Dense Search:** Semantic similarity with sentence-transformers
-- **BM25:** Keyword-based retrieval
-- **Fuzzy Matching:** Typo-tolerant search
-- **Hybrid:** Combines local and web search
+```bash
+# Build and run
+docker-compose up --build -d
 
-### Observability
+# View logs
+docker-compose logs -f
 
-- **Execution Traces:** Step-by-step tracking
-- **Conversation Memory:** Context preservation
-- **Health Checks:** Component monitoring
+# Stop
+docker-compose down
+```
 
-## 📊 Ingestion State Tracking
+## 🔧 Configuration
 
-The system maintains a JSON file (`data/ingestion_state.json`) to track:
+### Main Configuration (`config/config.yaml`)
 
-- Processed files and their hashes
-- Ingestion timestamps
-- Chunk counts
-- Processing status
+```yaml
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  temperature: 0.2
 
-This prevents reprocessing of unchanged files.
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  dimension: 1536
 
-## 🔒 Error Handling
+vector_db:
+  provider: "milvus_cloud"
+  index_type: "HNSW"
+  hnsw:
+    m: 32
+    ef_construction: 360
+    ef_search: 128
 
-- Comprehensive error handling at all levels
-- Automatic retries with exponential backoff
-- Fallback strategies when agents fail
-- Detailed error messages and logging
+retrieval:
+  fusion_method: "rrf"
+  enable_rerank: true
+  enable_diversity: true
+  enable_bm25: true
+
+chunking:
+  strategy: "semantic"
+  enable_cross_reference: true
+  enable_hierarchy: true
+```
+
+## 📈 Performance Tips
+
+1. **Increase HNSW M** for better recall (costs more memory)
+2. **Increase efSearch** for better accuracy (costs query time)
+3. **Use text-embedding-3-large** for higher quality embeddings
+4. **Enable GPU** for EasyOCR if processing many images
+
+## 🧪 Testing
+
+```bash
+# Install dev dependencies
+pip install pytest pytest-asyncio pytest-cov
+
+# Run tests
+pytest tests/ -v --cov=.
+```
 
 ## 📝 License
 
-MIT License
+MIT License - see [LICENSE](LICENSE)
 
-## 🤝 Contributing
+## 🙏 Acknowledgments
 
-Contributions welcome! Please read the contributing guidelines first.
+- [CrewAI](https://github.com/joaomdmoura/crewAI) - Multi-agent framework
+- [OpenAI](https://openai.com/) - LLM and embeddings
+- [Milvus](https://milvus.io/) / [Zilliz Cloud](https://cloud.zilliz.com) - Vector database
+- [EasyOCR](https://github.com/JaidedAI/EasyOCR) - OCR engine
+- [spaCy](https://spacy.io/) - NLP processing
 
+---
+
+**Built with ❤️ for Production AI Systems**

@@ -1,9 +1,21 @@
+"""
+Crew Manager - Production Grade with Advanced CrewAI Features
+
+Features:
+- OpenAI LLM integration
+- Milvus Cloud vector store
+- Advanced retrieval with RRF
+- Hierarchical agent process
+- Enhanced memory management
+- Comprehensive tracing
+"""
+
 import logging
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -11,21 +23,33 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CrewConfig:
     """Configuration for the crew manager."""
-    process: str = "sequential"  # sequential, hierarchical
+    process: str = "hierarchical"
     verbose: bool = True
+    
+    # Memory
     memory: bool = True
+    memory_type: str = "hybrid"
+    
+    # Iteration limits
     max_iterations: int = 5
     max_rpm: int = 10
     
-    # Component settings
+    # Agent toggles
     enable_supervisor: bool = True
     enable_retriever: bool = True
     enable_generator: bool = True
     enable_feedback: bool = True
     
-    # Fallback settings
+    # Fallback
     fallback_enabled: bool = True
     max_retries: int = 2
+    
+    # Callbacks
+    enable_callbacks: bool = True
+    log_agent_steps: bool = True
+    
+    # Caching
+    cache_responses: bool = True
 
 
 @dataclass
@@ -56,44 +80,95 @@ class QueryResult:
 
 
 class CrewManagerError(Exception):
-    """Exception raised for crew manager errors."""
+    """Exception for crew manager errors."""
     pass
+
+
+class AgentCallback:
+    """Callback handler for agent events."""
+    
+    def __init__(self, log_steps: bool = True):
+        self.log_steps = log_steps
+        self.steps: List[Dict[str, Any]] = []
+    
+    def on_agent_start(self, agent_name: str, task: str) -> None:
+        if self.log_steps:
+            logger.info(f"Agent '{agent_name}' starting: {task[:50]}...")
+        self.steps.append({
+            "event": "start",
+            "agent": agent_name,
+            "task": task,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def on_agent_finish(self, agent_name: str, result: Any) -> None:
+        if self.log_steps:
+            logger.info(f"Agent '{agent_name}' finished")
+        self.steps.append({
+            "event": "finish",
+            "agent": agent_name,
+            "result_length": len(str(result)) if result else 0,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def on_agent_error(self, agent_name: str, error: Exception) -> None:
+        logger.error(f"Agent '{agent_name}' error: {error}")
+        self.steps.append({
+            "event": "error",
+            "agent": agent_name,
+            "error": str(error),
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def get_steps(self) -> List[Dict[str, Any]]:
+        return self.steps
+    
+    def clear(self) -> None:
+        self.steps = []
 
 
 class CrewManager:
     """
-    Manager for coordinating multi-agent workflows.
+    Production-grade Crew Manager.
     
-    Handles:
-    - Agent instantiation and configuration
-    - Workflow execution
-    - Error handling and fallbacks
-    - Result aggregation
+    Features:
+    - OpenAI GPT-4o-mini LLM
+    - Milvus Cloud vector store
+    - Advanced retrieval with RRF fusion
+    - Multi-agent orchestration
     """
     
     def __init__(self, config: Optional[CrewConfig] = None):
-        """
-        Initialize the crew manager.
-        
-        Args:
-            config: Crew configuration
-        """
         self.config = config or CrewConfig()
         self._ensure_crewai_settings()
         
-        # Agent instances
+        # Agents
         self._supervisor = None
         self._retriever = None
         self._generator = None
         self._feedback = None
         
-        # Shared components
+        # Components
         self._llm = None
-        self._hybrid_retriever = None
+        self._advanced_retriever = None
         self._memory_store = None
         self._trace_logger = None
+        self._callback = None
         
         self._initialized = False
+    
+    def _ensure_crewai_settings(self) -> None:
+        """Ensure CrewAI settings file exists."""
+        existing_path = os.environ.get("CREWAI_SETTINGS_PATH")
+        if existing_path:
+            return
+        
+        default_path = Path(__file__).resolve().parent.parent / "config" / "crew_settings.json"
+        default_path.parent.mkdir(parents=True, exist_ok=True)
+        if not default_path.exists():
+            default_path.write_text("{}\n", encoding="utf-8")
+        
+        os.environ["CREWAI_SETTINGS_PATH"] = str(default_path)
     
     def initialize(self) -> None:
         """Initialize all components."""
@@ -103,71 +178,57 @@ class CrewManager:
         logger.info("Initializing crew manager...")
         
         try:
-            # Initialize LLM
+            if self.config.enable_callbacks:
+                self._callback = AgentCallback(self.config.log_agent_steps)
+            
             self._initialize_llm()
-            
-            # Initialize retrievers
             self._initialize_retrievers()
-            
-            # Initialize agents
             self._initialize_agents()
-            
-            # Initialize memory and trace
             self._initialize_support()
             
             self._initialized = True
             logger.info("Crew manager initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize crew manager: {e}")
+            logger.error(f"Crew manager initialization failed: {e}")
             raise CrewManagerError(f"Initialization failed: {str(e)}")
     
     def _initialize_llm(self) -> None:
-        """Initialize LLM client."""
-        try:
-            from llm import GroqClient, LLMConfig, LLMProvider
-            
-            api_key = os.getenv("GROQ_API_KEY")
-            if not api_key:
-                raise ValueError("GROQ_API_KEY environment variable not set")
-            
-            config = LLMConfig(
-                provider=LLMProvider.GROQ,
-                model="openai/gpt-oss-120b",
-                api_key=api_key,
-                temperature=0.2,
-                max_tokens=4096
-            )
-            self._llm = GroqClient(config)
-            logger.info("LLM initialized")
-            
-        except Exception as e:
-            logger.error(f"LLM initialization failed: {e}")
-            raise
-
-    def _ensure_crewai_settings(self) -> None:
-        """Ensure CrewAI settings file exists to prevent noisy CLI warnings."""
-        existing_path = os.environ.get("CREWAI_SETTINGS_PATH")
-        if existing_path:
-            return
-
-        default_path = Path(__file__).resolve().parent.parent / "config" / "crew_settings.json"
-        default_path.parent.mkdir(parents=True, exist_ok=True)
-        if not default_path.exists():
-            default_path.write_text("{}\n", encoding="utf-8")
-
-        os.environ["CREWAI_SETTINGS_PATH"] = str(default_path)
+        """Initialize OpenAI LLM client."""
+        from llm import OpenAIClient, LLMConfig, LLMProvider
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+        
+        config = LLMConfig(
+            provider=LLMProvider.OPENAI,
+            model="gpt-4o-mini",
+            api_key=api_key,
+            temperature=0.2,
+            max_tokens=4096
+        )
+        self._llm = OpenAIClient(config)
+        logger.info("OpenAI LLM initialized")
     
     def _initialize_retrievers(self) -> None:
-        """Initialize retrieval components."""
+        """Initialize Milvus-based retriever."""
         try:
-            from retriever import HybridRetriever
+            from retriever import AdvancedRetriever, AdvancedRetrieverConfig
             
-            self._hybrid_retriever = HybridRetriever()
-            logger.info("Hybrid retriever initialized")
+            config = AdvancedRetrieverConfig(
+                collection_name="documents",
+                enable_rerank=True,
+                enable_diversity=True,
+                enable_bm25=True,
+                fusion_method="rrf"
+            )
+            self._advanced_retriever = AdvancedRetriever(config)
+            logger.info("Advanced retriever initialized")
             
         except Exception as e:
-            logger.warning(f"Hybrid retriever initialization failed: {e}")
+            logger.error(f"Retriever initialization failed: {e}")
+            raise
     
     def _initialize_agents(self) -> None:
         """Initialize agent instances."""
@@ -183,7 +244,7 @@ class CrewManager:
             self._retriever = RetrieverAgent(
                 llm=self._llm,
                 verbose=self.config.verbose,
-                hybrid_retriever=self._hybrid_retriever
+                hybrid_retriever=self._advanced_retriever
             )
         
         if self.config.enable_generator:
@@ -202,13 +263,16 @@ class CrewManager:
     
     def _initialize_support(self) -> None:
         """Initialize support components."""
-        from .memory_store import MemoryStore
-        from .trace_logger import TraceLogger
-        
-        if self.config.memory:
-            self._memory_store = MemoryStore()
-        
-        self._trace_logger = TraceLogger()
+        try:
+            from .memory_store import MemoryStore
+            from .trace_logger import TraceLogger
+            
+            if self.config.memory:
+                self._memory_store = MemoryStore()
+            
+            self._trace_logger = TraceLogger()
+        except ImportError as e:
+            logger.warning(f"Support components not available: {e}")
     
     def execute_query(
         self,
@@ -221,17 +285,20 @@ class CrewManager:
         
         Args:
             query: User query
-            context: Optional context from previous interactions
+            context: Optional context
             metadata: Additional metadata
             
         Returns:
-            QueryResult with response and execution details
+            QueryResult with response and details
         """
         if not self._initialized:
             self.initialize()
         
         start_time = datetime.now()
         steps_executed = []
+        
+        if self._callback:
+            self._callback.clear()
         
         result = QueryResult(
             query=query,
@@ -245,73 +312,88 @@ class CrewManager:
         )
         
         try:
-            # Start trace
-            trace_id = self._trace_logger.start_trace(query)
+            trace_id = None
+            if self._trace_logger:
+                trace_id = self._trace_logger.start_trace(query)
             
-            # Step 1: Query Analysis (Supervisor)
+            # Step 1: Query Analysis
             analysis = None
             if self._supervisor:
-                self._trace_logger.log_step(trace_id, "supervisor", "analyze_query", "started")
+                if self._callback:
+                    self._callback.on_agent_start("supervisor", "analyze_query")
+                
                 analysis = self._supervisor.analyze_query(query, context)
-                self._trace_logger.log_step(trace_id, "supervisor", "analyze_query", "completed", analysis)
+                
+                if self._callback:
+                    self._callback.on_agent_finish("supervisor", analysis)
                 
                 steps_executed.append({
                     "step": 1,
                     "agent": "supervisor",
                     "action": "analyze_query",
-                    "result": analysis
+                    "result": {
+                        "query_type": analysis.query_type.value if hasattr(analysis, 'query_type') else "unknown",
+                        "complexity": getattr(analysis, 'complexity', 'moderate')
+                    }
                 })
             
             # Step 2: Information Retrieval
             retrieval_result = None
             if self._retriever:
-                self._trace_logger.log_step(trace_id, "retriever", "retrieve", "started")
+                if self._callback:
+                    self._callback.on_agent_start("retriever", "retrieve")
                 
-                use_web = self._supervisor.should_use_web_search(analysis) if analysis else False
-                search_queries = self._supervisor.create_search_queries(analysis) if analysis else [query]
+                use_web = False
+                search_queries = [query]
+                
+                if analysis:
+                    use_web = self._supervisor.should_use_web_search(analysis)
+                    search_queries = self._supervisor.create_search_queries(analysis)
+                    content_types = getattr(analysis, 'content_types_needed', ['text'])
+                else:
+                    content_types = ['text']
                 
                 retrieval_result = self._retriever.retrieve(
                     query=query,
                     search_queries=search_queries,
                     use_documents=True,
-                    use_web=use_web
+                    use_web=use_web,
+                    content_types=content_types
                 )
                 
-                self._trace_logger.log_step(trace_id, "retriever", "retrieve", "completed", {
-                    "local_count": len(retrieval_result.get("local_results", [])),
-                    "web_count": len(retrieval_result.get("web_results", []))
-                })
+                if self._callback:
+                    self._callback.on_agent_finish("retriever", retrieval_result)
                 
                 steps_executed.append({
                     "step": 2,
                     "agent": "retriever",
                     "action": "retrieve",
                     "result": {
-                        "local_results": len(retrieval_result.get("local_results", [])),
-                        "web_results": len(retrieval_result.get("web_results", []))
+                        "local_count": len(retrieval_result.local_results),
+                        "web_count": len(retrieval_result.web_results),
+                        "total": retrieval_result.total_results
                     }
                 })
                 
-                result.sources = retrieval_result.get("sources", [])
+                result.sources = retrieval_result.sources
             
             # Step 3: Answer Generation
             generation_result = None
             if self._generator and retrieval_result:
-                self._trace_logger.log_step(trace_id, "generator", "generate", "started")
+                if self._callback:
+                    self._callback.on_agent_start("generator", "generate")
                 
-                context_text = retrieval_result.get("combined_context", "")
+                context_text = retrieval_result.combined_context
                 
                 generation_result = self._generator.generate(
                     query=query,
                     context=context_text,
-                    analysis=analysis,
+                    analysis=analysis.to_dict() if hasattr(analysis, 'to_dict') else analysis,
                     sources=result.sources
                 )
                 
-                self._trace_logger.log_step(trace_id, "generator", "generate", "completed", {
-                    "response_length": len(generation_result.get("response", "")),
-                    "confidence": generation_result.get("confidence", 0)
-                })
+                if self._callback:
+                    self._callback.on_agent_finish("generator", generation_result)
                 
                 steps_executed.append({
                     "step": 3,
@@ -326,20 +408,19 @@ class CrewManager:
                 result.response = generation_result.get("response", "")
                 result.confidence = generation_result.get("confidence", 0)
             
-            # Step 4: Response Validation and Improvement
+            # Step 4: Response Validation
             if self._feedback and generation_result:
-                self._trace_logger.log_step(trace_id, "feedback", "validate", "started")
+                if self._callback:
+                    self._callback.on_agent_start("feedback", "validate")
                 
                 validation = self._feedback.validate_response(
                     query=query,
                     response=result.response,
-                    context=retrieval_result.get("combined_context", "")
+                    context=retrieval_result.combined_context if retrieval_result else ""
                 )
                 
-                self._trace_logger.log_step(trace_id, "feedback", "validate", "completed", {
-                    "is_valid": validation.get("is_valid"),
-                    "score": validation.get("overall_score")
-                })
+                if self._callback:
+                    self._callback.on_agent_finish("feedback", validation)
                 
                 steps_executed.append({
                     "step": 4,
@@ -347,26 +428,19 @@ class CrewManager:
                     "action": "validate",
                     "result": {
                         "is_valid": validation.get("is_valid"),
-                        "score": validation.get("overall_score"),
-                        "issues": validation.get("issues", [])
+                        "score": validation.get("overall_score")
                     }
                 })
                 
                 # Improve if needed
                 if validation.get("revision_needed"):
-                    self._trace_logger.log_step(trace_id, "feedback", "improve", "started")
-                    
-                    improved_response = self._feedback.critique_and_improve(
+                    improved = self._feedback.critique_and_improve(
                         query=query,
                         response=result.response,
-                        context=retrieval_result.get("combined_context", ""),
+                        context=retrieval_result.combined_context if retrieval_result else "",
                         validation=validation
                     )
-                    
-                    result.response = improved_response
-                    
-                    self._trace_logger.log_step(trace_id, "feedback", "improve", "completed")
-                    
+                    result.response = improved
                     steps_executed.append({
                         "step": 5,
                         "agent": "feedback",
@@ -374,63 +448,62 @@ class CrewManager:
                         "result": {"improved": True}
                     })
                 
-                # Update confidence based on validation
                 result.confidence = validation.get("overall_score", result.confidence)
             
             # Store in memory
-            if self._memory_store:
+            if self._memory_store and retrieval_result:
                 self._memory_store.store(
                     query=query,
                     response=result.response,
-                    context=retrieval_result.get("combined_context", "") if retrieval_result else "",
+                    context=retrieval_result.combined_context,
                     metadata={"trace_id": trace_id}
                 )
             
             # Complete trace
-            self._trace_logger.end_trace(trace_id, success=True)
+            if self._trace_logger and trace_id:
+                self._trace_logger.end_trace(trace_id, success=True)
             
             result.success = True
             result.steps_executed = steps_executed
             result.execution_time = (datetime.now() - start_time).total_seconds()
-            result.metadata["trace_id"] = trace_id
+            
+            if trace_id:
+                result.metadata["trace_id"] = trace_id
+            
+            if self._callback:
+                result.metadata["agent_steps"] = self._callback.get_steps()
             
             logger.info(
-                f"Query executed successfully in {result.execution_time:.2f}s "
+                f"Query executed in {result.execution_time:.2f}s "
                 f"(confidence: {result.confidence:.2f})"
             )
             
         except Exception as e:
             logger.error(f"Query execution failed: {e}")
+            
+            if self._callback:
+                self._callback.on_agent_error("pipeline", e)
+            
             result.error = str(e)
             result.success = False
             result.execution_time = (datetime.now() - start_time).total_seconds()
             
-            # Attempt fallback
             if self.config.fallback_enabled:
-                fallback_result = self._execute_fallback(query)
-                if fallback_result:
-                    result.response = fallback_result
+                fallback = self._execute_fallback(query)
+                if fallback:
+                    result.response = fallback
                     result.success = True
                     result.metadata["fallback_used"] = True
         
         return result
     
     def _execute_fallback(self, query: str) -> Optional[str]:
-        """
-        Execute fallback strategy when main pipeline fails.
-        
-        Args:
-            query: Original query
-            
-        Returns:
-            Fallback response or None
-        """
-        logger.info("Executing fallback strategy...")
+        """Execute fallback strategy."""
+        logger.info("Executing fallback...")
         
         try:
             import asyncio
             
-            # Simple direct LLM response
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
@@ -439,73 +512,37 @@ class CrewManager:
             
             response = loop.run_until_complete(
                 self._llm.simple_generate(
-                    prompt=f"Please answer the following question to the best of your ability:\n\n{query}",
-                    system_prompt="You are a helpful assistant. If you don't have enough information, say so clearly."
+                    prompt=f"Please answer: {query}",
+                    system_prompt="You are a helpful assistant."
                 )
             )
             
             return response.strip()
             
         except Exception as e:
-            logger.error(f"Fallback also failed: {e}")
+            logger.error(f"Fallback failed: {e}")
             return None
     
     def get_execution_trace(self, trace_id: str) -> Dict[str, Any]:
-        """
-        Get execution trace for a query.
-        
-        Args:
-            trace_id: Trace identifier
-            
-        Returns:
-            Trace data dictionary
-        """
         if self._trace_logger:
             return self._trace_logger.get_trace(trace_id)
         return {}
     
     def get_conversation_history(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get recent conversation history.
-        
-        Args:
-            limit: Maximum number of entries
-            
-        Returns:
-            List of conversation entries
-        """
         if self._memory_store:
             return self._memory_store.get_recent(limit)
         return []
     
     def clear_memory(self) -> None:
-        """Clear conversation memory."""
         if self._memory_store:
             self._memory_store.clear()
     
     @property
     def is_initialized(self) -> bool:
-        """Check if manager is initialized."""
         return self._initialized
 
 
-def create_crew_manager(
-    verbose: bool = True,
-    memory: bool = True,
-    **kwargs
-) -> CrewManager:
-    """
-    Factory function to create a crew manager.
-    
-    Args:
-        verbose: Enable verbose output
-        memory: Enable memory
-        **kwargs: Additional configuration
-        
-    Returns:
-        Configured CrewManager instance
-    """
-    config = CrewConfig(verbose=verbose, memory=memory, **kwargs)
-    manager = CrewManager(config)
-    return manager
-
+def create_crew_manager(**kwargs) -> CrewManager:
+    """Factory function."""
+    config = CrewConfig(**kwargs)
+    return CrewManager(config)

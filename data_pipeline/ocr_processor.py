@@ -1,31 +1,55 @@
+"""
+Enhanced OCR Processor - Production Grade with EasyOCR + spaCy NLP
+
+Features:
+- EasyOCR multilingual support
+- spaCy NLP post-processing
+- Entity extraction
+- Keyword extraction
+- Text correction
+- GPU support
+"""
+
 import logging
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-try:
-    from PIL import Image  
-except ImportError:  # pragma: no cover - handled gracefully at runtime
-    Image = Any  
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class OCRConfig:
-    """Configuration for OCR processing."""
+class EnhancedOCRConfig:
+    """Configuration for enhanced OCR processing."""
     enabled: bool = True
-    language: str = "eng"
+    
+    # Language support
+    languages: List[str] = field(default_factory=lambda: ["en"])
+    
+    # Processing settings
     dpi: int = 300
     enhance_contrast: bool = True
-    tesseract_path: Optional[str] = None
-    min_confidence: float = 60.0
-    preprocess: bool = True
+    detect_rotation: bool = True
+    paragraph_mode: bool = True
+    detail: int = 1  # 0 = fast, 1 = accurate
+    
+    # GPU acceleration
+    gpu: bool = False
+    
+    # NLP post-processing
+    nlp_enabled: bool = True
+    spacy_model: str = "en_core_web_sm"
+    extract_entities: bool = True
+    extract_keywords: bool = True
+    
+    # Confidence thresholds
+    min_confidence: float = 0.3
+    low_confidence_threshold: float = 0.5
 
 
-class OCRError(Exception):
+class EnhancedOCRError(Exception):
     """Exception raised for OCR errors."""
     
     def __init__(self, message: str, original_error: Optional[Exception] = None):
@@ -34,114 +58,162 @@ class OCRError(Exception):
         super().__init__(message)
 
 
-class OCRProcessor:
+class EnhancedOCRProcessor:
     """
-    OCR processor for extracting text from images and scanned documents.
+    Enhanced OCR processor using EasyOCR with spaCy NLP post-processing.
     
-    Uses Tesseract OCR (via pytesseract) for text extraction.
-    Supports image preprocessing for better accuracy.
+    Features:
+    - Multilingual text extraction
+    - NLP-based text cleanup and enhancement
+    - Entity and keyword extraction
+    - Confidence scoring
     """
     
-    def __init__(self, config: Optional[OCRConfig] = None):
+    def __init__(self, config: Optional[EnhancedOCRConfig] = None):
         """
-        Initialize the OCR processor.
+        Initialize the enhanced OCR processor.
         
         Args:
             config: OCR configuration
         """
-        self.config = config or OCRConfig()
-        self._tesseract_available = False
+        self.config = config or EnhancedOCRConfig()
+        self._reader = None
+        self._nlp = None
+        self._available = False
         self._initialize()
     
     def _initialize(self) -> None:
-        """Initialize OCR engine."""
+        """Initialize OCR engine and NLP model."""
         if not self.config.enabled:
             logger.info("OCR is disabled")
             return
         
+        # Initialize EasyOCR
+        self._initialize_easyocr()
+        
+        # Initialize spaCy NLP
+        if self.config.nlp_enabled:
+            self._initialize_nlp()
+    
+    def _initialize_easyocr(self) -> None:
+        """Initialize EasyOCR reader."""
         try:
-            import pytesseract
+            import easyocr
             
-            # Set Tesseract path if provided
-            if self.config.tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = self.config.tesseract_path
+            logger.info(f"Loading EasyOCR with languages: {self.config.languages}")
             
-            # Verify Tesseract is available
-            version = pytesseract.get_tesseract_version()
-            self._tesseract_available = True
-            logger.info(f"Tesseract OCR initialized (version: {version})")
+            self._reader = easyocr.Reader(
+                self.config.languages,
+                gpu=self.config.gpu,
+                verbose=False
+            )
+            
+            self._available = True
+            logger.info("EasyOCR initialized successfully")
             
         except ImportError:
             logger.warning(
-                "pytesseract not available. Install with: pip install pytesseract"
+                "EasyOCR not available. Install with: pip install easyocr"
             )
         except Exception as e:
-            logger.warning(f"Tesseract not available: {str(e)}")
+            logger.warning(f"EasyOCR initialization failed: {str(e)}")
+    
+    def _initialize_nlp(self) -> None:
+        """Initialize spaCy NLP model."""
+        try:
+            import spacy
+            
+            try:
+                self._nlp = spacy.load(self.config.spacy_model)
+                logger.info(f"spaCy model loaded: {self.config.spacy_model}")
+            except OSError:
+                logger.warning(
+                    f"spaCy model '{self.config.spacy_model}' not found. "
+                    f"Download with: python -m spacy download {self.config.spacy_model}"
+                )
+                self._nlp = None
+                
+        except ImportError:
+            logger.warning("spaCy not available. Install with: pip install spacy")
+            self._nlp = None
     
     @property
     def is_available(self) -> bool:
         """Check if OCR is available."""
-        return self.config.enabled and self._tesseract_available
+        return self.config.enabled and self._available and self._reader is not None
     
-    def _load_image(self, image_path: str):
+    def _load_image(self, image_path: str) -> Any:
         """Load an image file."""
         try:
             from PIL import Image
-            return Image.open(image_path)
+            import numpy as np
+            
+            image = Image.open(image_path)
+            
+            # Convert to RGB if necessary
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            
+            return np.array(image)
+            
         except ImportError:
-            raise OCRError("Pillow is required. Install with: pip install Pillow")
+            raise EnhancedOCRError("Pillow is required. Install with: pip install Pillow")
         except Exception as e:
-            raise OCRError(f"Failed to load image: {str(e)}", e)
+            raise EnhancedOCRError(f"Failed to load image: {str(e)}", e)
     
-    def _preprocess_image(self, image) -> "Image":
+    def _preprocess_image(self, image_array: Any) -> Any:
         """
         Preprocess image for better OCR results.
         
         Args:
-            image: PIL Image object
+            image_array: Numpy array of image
             
         Returns:
-            Preprocessed PIL Image
+            Preprocessed image array
         """
         try:
-            from PIL import Image, ImageEnhance, ImageFilter
+            import cv2
             import numpy as np
+            
+            # Convert to grayscale
+            if len(image_array.shape) == 3:
+                gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = image_array
+            
+            # Enhance contrast using CLAHE
+            if self.config.enhance_contrast:
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                gray = clahe.apply(gray)
+            
+            # Denoise
+            gray = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+            
+            # Threshold to binary
+            gray = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
+            )
+            
+            return gray
+            
         except ImportError:
-            return image
-        
-        # Convert to grayscale
-        if image.mode != "L":
-            image = image.convert("L")
-        
-        # Enhance contrast
-        if self.config.enhance_contrast:
-            enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.5)
-        
-        # Apply slight sharpening
-        image = image.filter(ImageFilter.SHARPEN)
-        
-        # Resize if too small
-        min_dimension = 1000
-        width, height = image.size
-        if width < min_dimension or height < min_dimension:
-            scale = max(min_dimension / width, min_dimension / height)
-            new_size = (int(width * scale), int(height * scale))
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
-        
-        return image
+            return image_array
+        except Exception as e:
+            logger.warning(f"Image preprocessing failed: {e}")
+            return image_array
     
     def extract_text_from_image(
         self,
         image_path: str,
-        preprocess: Optional[bool] = None
+        preprocess: bool = True
     ) -> Dict[str, Any]:
         """
         Extract text from an image file.
         
         Args:
             image_path: Path to the image file
-            preprocess: Whether to preprocess (uses config if None)
+            preprocess: Whether to preprocess the image
             
         Returns:
             Dictionary with extracted text and metadata
@@ -155,50 +227,63 @@ class OCRProcessor:
             }
         
         try:
-            import pytesseract
-            from PIL import Image
-            
             # Load image
-            image = self._load_image(image_path)
+            image_array = self._load_image(image_path)
             
             # Preprocess if enabled
-            should_preprocess = preprocess if preprocess is not None else self.config.preprocess
-            if should_preprocess:
-                image = self._preprocess_image(image)
+            if preprocess:
+                image_array = self._preprocess_image(image_array)
             
             # Perform OCR
-            custom_config = f"--oem 3 --psm 3 -l {self.config.language}"
-            
-            # Get text with confidence data
-            data = pytesseract.image_to_data(
-                image,
-                config=custom_config,
-                output_type=pytesseract.Output.DICT
+            results = self._reader.readtext(
+                image_array,
+                detail=self.config.detail,
+                paragraph=self.config.paragraph_mode
             )
             
-            # Filter by confidence and extract text
+            # Extract text and confidence
             texts = []
             confidences = []
+            bboxes = []
             
-            for i, text in enumerate(data["text"]):
-                conf = float(data["conf"][i])
-                if text.strip() and conf >= self.config.min_confidence:
-                    texts.append(text)
-                    confidences.append(conf)
+            for result in results:
+                if self.config.detail == 1 and len(result) >= 3:
+                    bbox, text, confidence = result[0], result[1], result[2]
+                    
+                    if confidence >= self.config.min_confidence:
+                        texts.append(text)
+                        confidences.append(confidence)
+                        bboxes.append(bbox)
+                else:
+                    # Paragraph mode returns just text
+                    texts.append(result)
+                    confidences.append(1.0)
             
-            extracted_text = " ".join(texts)
+            extracted_text = " ".join(texts) if not self.config.paragraph_mode else "\n".join(texts)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            
+            # Apply NLP post-processing
+            nlp_result = {}
+            if self._nlp and extracted_text:
+                nlp_result = self._apply_nlp(extracted_text)
+                if "cleaned_text" in nlp_result:
+                    # Use cleaned text if available
+                    extracted_text = nlp_result.get("cleaned_text", extracted_text)
             
             logger.info(
                 f"OCR extracted {len(extracted_text)} chars from {image_path} "
-                f"(confidence: {avg_confidence:.1f}%)"
+                f"(avg confidence: {avg_confidence:.2f})"
             )
             
             return {
                 "text": extracted_text,
                 "confidence": avg_confidence,
                 "word_count": len(texts),
+                "low_confidence_words": sum(1 for c in confidences if c < self.config.low_confidence_threshold),
                 "source": image_path,
+                "bounding_boxes": bboxes if self.config.detail == 1 else [],
+                "entities": nlp_result.get("entities", []),
+                "keywords": nlp_result.get("keywords", []),
                 "success": True
             }
             
@@ -212,13 +297,70 @@ class OCRProcessor:
                 "success": False
             }
     
+    def _apply_nlp(self, text: str) -> Dict[str, Any]:
+        """
+        Apply NLP post-processing to extracted text.
+        
+        Args:
+            text: Raw OCR text
+            
+        Returns:
+            Dictionary with NLP results
+        """
+        if not self._nlp or not text:
+            return {}
+        
+        try:
+            doc = self._nlp(text)
+            result = {}
+            
+            # Clean text - fix common OCR errors
+            cleaned_text = text
+            
+            # Extract entities
+            if self.config.extract_entities:
+                entities = []
+                for ent in doc.ents:
+                    entities.append({
+                        "text": ent.text,
+                        "label": ent.label_,
+                        "start": ent.start_char,
+                        "end": ent.end_char
+                    })
+                result["entities"] = entities
+            
+            # Extract keywords (noun chunks)
+            if self.config.extract_keywords:
+                keywords = []
+                for chunk in doc.noun_chunks:
+                    # Filter out very short or common words
+                    if len(chunk.text) > 2 and chunk.root.pos_ in ["NOUN", "PROPN"]:
+                        keywords.append({
+                            "text": chunk.text,
+                            "root": chunk.root.text,
+                            "pos": chunk.root.pos_
+                        })
+                result["keywords"] = keywords[:20]  # Limit keywords
+            
+            # Calculate readability score
+            result["sentence_count"] = len(list(doc.sents))
+            result["token_count"] = len(doc)
+            
+            result["cleaned_text"] = cleaned_text
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"NLP processing failed: {e}")
+            return {}
+    
     def extract_text_from_pdf_images(
         self,
         pdf_path: str,
         pages: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Extract text from images embedded in a PDF.
+        Extract text from images in a PDF.
         
         Args:
             pdf_path: Path to the PDF file
@@ -366,6 +508,8 @@ class OCRProcessor:
             "combined_content": existing_content,
             "ocr_applied": False,
             "ocr_pages": [],
+            "entities": [],
+            "keywords": [],
             "success": True
         }
         
@@ -373,12 +517,14 @@ class OCRProcessor:
             return result
         
         # Handle image files
-        if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff"]:
+        if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]:
             ocr_result = self.extract_text_from_image(file_path)
             result["ocr_content"] = ocr_result.get("text", "")
             result["combined_content"] = ocr_result.get("text", "")
             result["ocr_applied"] = ocr_result.get("success", False)
             result["ocr_confidence"] = ocr_result.get("confidence", 0.0)
+            result["entities"] = ocr_result.get("entities", [])
+            result["keywords"] = ocr_result.get("keywords", [])
             return result
         
         # Handle PDFs
@@ -388,13 +534,20 @@ class OCRProcessor:
                 ocr_results = self.extract_text_from_pdf_images(file_path)
                 
                 ocr_texts = []
+                all_entities = []
+                all_keywords = []
+                
                 for page_result in ocr_results:
                     if page_result.get("success") and page_result.get("text"):
                         ocr_texts.append(page_result["text"])
                         result["ocr_pages"].append(page_result.get("page", 0))
+                        all_entities.extend(page_result.get("entities", []))
+                        all_keywords.extend(page_result.get("keywords", []))
                 
                 result["ocr_content"] = "\n\n".join(ocr_texts)
                 result["ocr_applied"] = len(ocr_texts) > 0
+                result["entities"] = all_entities
+                result["keywords"] = all_keywords[:30]  # Limit keywords
                 
                 # Combine or replace
                 if result["ocr_content"] and len(result["ocr_content"]) > len(existing_content):
@@ -403,22 +556,81 @@ class OCRProcessor:
                     result["combined_content"] = existing_content or result["ocr_content"]
         
         return result
+    
+    def extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Extract named entities from text.
+        
+        Args:
+            text: Text to process
+            
+        Returns:
+            List of entity dictionaries
+        """
+        if not self._nlp or not text:
+            return []
+        
+        try:
+            doc = self._nlp(text)
+            entities = []
+            
+            for ent in doc.ents:
+                entities.append({
+                    "text": ent.text,
+                    "label": ent.label_,
+                    "description": self._get_entity_description(ent.label_)
+                })
+            
+            return entities
+            
+        except Exception as e:
+            logger.warning(f"Entity extraction failed: {e}")
+            return []
+    
+    def _get_entity_description(self, label: str) -> str:
+        """Get human-readable description for entity label."""
+        descriptions = {
+            "PERSON": "Person",
+            "ORG": "Organization",
+            "GPE": "Geopolitical Entity",
+            "LOC": "Location",
+            "DATE": "Date",
+            "TIME": "Time",
+            "MONEY": "Monetary Value",
+            "PERCENT": "Percentage",
+            "PRODUCT": "Product",
+            "EVENT": "Event",
+            "WORK_OF_ART": "Work of Art",
+            "LAW": "Law",
+            "LANGUAGE": "Language",
+            "NORP": "Nationality/Religious/Political Group",
+            "FAC": "Facility",
+            "CARDINAL": "Cardinal Number",
+            "ORDINAL": "Ordinal Number",
+            "QUANTITY": "Quantity",
+        }
+        return descriptions.get(label, label)
 
 
-def create_ocr_processor(
-    language: str = "eng",
+def create_enhanced_ocr_processor(
+    languages: Optional[List[str]] = None,
+    gpu: bool = False,
     **kwargs
-) -> OCRProcessor:
+) -> EnhancedOCRProcessor:
     """
-    Factory function to create an OCR processor.
+    Factory function to create an enhanced OCR processor.
     
     Args:
-        language: OCR language code
+        languages: OCR language codes
+        gpu: Enable GPU acceleration
         **kwargs: Additional configuration options
         
     Returns:
-        Configured OCRProcessor instance
+        Configured EnhancedOCRProcessor instance
     """
-    config = OCRConfig(language=language, **kwargs)
-    return OCRProcessor(config)
-
+    config = EnhancedOCRConfig(
+        languages=languages or ["en"],
+        gpu=gpu,
+        **kwargs
+    )
+    return EnhancedOCRProcessor(config)

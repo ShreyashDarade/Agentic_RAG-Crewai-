@@ -1,12 +1,37 @@
+"""
+LLM Module - Production Grade (OpenAI Only)
 
-from .base_llm import BaseLLM, LLMResponse, LLMConfig, LLMProvider
-from .groq_client import GroqClient
+Provides:
+- OpenAI GPT client with function calling, streaming, and tools API
+- Base LLM classes and utilities
+"""
+
+from .base_llm import (
+    BaseLLM,
+    LLMConfig,
+    LLMMessage,
+    LLMResponse,
+    LLMProvider,
+    LLMRole,
+    LLMError,
+)
+from .openai_client import (
+    OpenAIClient,
+    OpenAIError,
+    create_openai_client,
+)
 
 __all__ = [
+    # Base classes
     "BaseLLM",
-    "LLMResponse",
     "LLMConfig",
-    "GroqClient",
+    "LLMMessage",
+    "LLMResponse",
     "LLMProvider",
+    "LLMRole",
+    "LLMError",
+    # OpenAI Client
+    "OpenAIClient",
+    "OpenAIError",
+    "create_openai_client",
 ]
-

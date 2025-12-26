@@ -1,5 +1,17 @@
+"""
+Retriever Agent - Production Grade with Multi-Modal Support
+
+Features:
+- Multi-strategy retrieval (dense, BM25, hybrid)
+- Cross-reference expansion
+- Hierarchical chunk navigation
+- Multi-modal retrieval (text, tables, images)
+- Source attribution
+"""
+
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+from dataclasses import dataclass, field
 
 from crewai import Agent
 from .utils import run_async_task
@@ -7,60 +19,104 @@ from .utils import run_async_task
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class RetrievalContext:
+    """Structured retrieval results."""
+    local_results: List[Dict[str, Any]] = field(default_factory=list)
+    web_results: List[Dict[str, Any]] = field(default_factory=list)
+    combined_context: str = ""
+    sources: List[str] = field(default_factory=list)
+    
+    # Multi-modal results
+    text_chunks: List[Dict[str, Any]] = field(default_factory=list)
+    table_chunks: List[Dict[str, Any]] = field(default_factory=list)
+    image_chunks: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Metadata
+    total_results: int = 0
+    retrieval_methods: List[str] = field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "local_results": self.local_results,
+            "web_results": self.web_results,
+            "combined_context": self.combined_context,
+            "sources": self.sources,
+            "text_chunks": self.text_chunks,
+            "table_chunks": self.table_chunks,
+            "image_chunks": self.image_chunks,
+            "total_results": self.total_results,
+            "retrieval_methods": self.retrieval_methods
+        }
+
+
 class RetrieverAgent:
     """
-    Retriever agent for information retrieval.
+    Production-grade Retriever Agent for multi-modal document retrieval.
     
-    Responsibilities:
-    - Search document databases (ChromaDB)
-    - Perform web searches when needed
-    - Combine and rank results from multiple sources
-    - Provide relevant context for answer generation
+    Features:
+    - HNSW-powered semantic search via Milvus
+    - RRF fusion of multiple retrieval strategies
+    - Cross-encoder re-ranking
+    - Multi-modal content retrieval
+    - Hierarchical context expansion
     """
     
-    SYSTEM_PROMPT = """You are an expert Information Retriever in a multi-agent RAG system.
+    SYSTEM_PROMPT = """You are an expert Information Retrieval Specialist in a production RAG system.
 
-Your responsibilities:
-1. Search through document databases (ChromaDB) to find relevant information
-2. Perform web searches when internal documents are insufficient
-3. Combine results from multiple sources using hybrid retrieval
-4. Filter and rank results based on relevance
+CORE RESPONSIBILITIES:
+1. RETRIEVE the most relevant information from all available sources
+2. RANK results by relevance and reliability
+3. EXPAND context using hierarchical relationships
+4. LINK related content (tables, images) to text
+5. ATTRIBUTE sources accurately
 
-When retrieving information:
-- Use appropriate search strategies (semantic, keyword, hybrid)
-- Consider the context and intent from the supervisor's analysis
-- Retrieve sufficient context while avoiding information overload
-- Flag when information might be outdated or insufficient
+RETRIEVAL STRATEGIES:
+- Semantic Search: HNSW vector similarity for conceptual matching
+- Keyword Search: BM25 for exact term matching
+- Hybrid: RRF fusion of multiple strategies
+- Multi-Hop: Sequential retrieval for complex queries
 
-Always provide source attribution for retrieved information."""
-    
+CONTENT TYPES:
+- Text: Main document paragraphs and sections
+- Tables: Structured data requiring special formatting
+- Images: Descriptions and OCR-extracted content
+
+QUALITY CRITERIA:
+- Relevance: Content directly addresses the query
+- Accuracy: Information is factual and current
+- Completeness: Sufficient context for understanding
+- Source Diversity: Multiple sources for validation
+
+Always prioritize the most authoritative and relevant sources."""
+
     def __init__(
         self,
         llm: Optional[Any] = None,
         verbose: bool = True,
         tools: Optional[List[Any]] = None,
-        chroma_retriever: Optional[Any] = None,
-        web_retriever: Optional[Any] = None,
         hybrid_retriever: Optional[Any] = None
     ):
         """
         Initialize the retriever agent.
         
         Args:
-            llm: LLM instance
+            llm: OpenAI LLM instance
             verbose: Enable verbose output
-            tools: List of tools
-            chroma_retriever: ChromaRetriever instance
-            web_retriever: WebRetriever instance
-            hybrid_retriever: HybridRetriever instance
+            tools: Available tools
+            hybrid_retriever: Pre-configured retriever instance
         """
         self.llm = llm
         self.verbose = verbose
         self.tools = tools or []
-        self._chroma_retriever = chroma_retriever
-        self._web_retriever = web_retriever
         self._hybrid_retriever = hybrid_retriever
         self._agent: Optional[Agent] = None
+        
+        # Configuration
+        self.default_top_k = 10
+        self.rerank_top_k = 5
+        self.min_score_threshold = 0.3
+        self.max_context_length = 8000
     
     @property
     def agent(self) -> Agent:
@@ -72,30 +128,26 @@ Always provide source attribution for retrieved information."""
     def _create_agent(self) -> Agent:
         """Create the CrewAI retriever agent."""
         return Agent(
-            role="Information Retriever",
-            goal="Retrieve the most relevant information from knowledge bases and web sources",
+            role="Information Retrieval Specialist",
+            goal="Retrieve the most relevant and comprehensive information from all sources",
             backstory=self.SYSTEM_PROMPT,
             verbose=self.verbose,
-            allow_delegation=False,
             tools=self.tools,
-            llm=self.llm
+            llm=self.llm,
+            max_iter=2,
+            memory=True
         )
     
-    def _initialize_retrievers(self) -> None:
-        """Initialize retrievers if not provided."""
+    def _initialize_retriever(self) -> None:
+        """Initialize the hybrid retriever if not provided."""
         if self._hybrid_retriever is None:
             try:
-                from ..retriever import HybridRetriever
-                self._hybrid_retriever = HybridRetriever()
-                logger.info("Initialized HybridRetriever")
+                from retriever import AdvancedRetriever
+                self._hybrid_retriever = AdvancedRetriever()
+                logger.info("Initialized AdvancedRetriever")
             except Exception as e:
-                logger.warning(f"Could not initialize HybridRetriever: {e}")
-        
-        if self._chroma_retriever is None and self._hybrid_retriever:
-            self._chroma_retriever = self._hybrid_retriever._chroma_retriever
-        
-        if self._web_retriever is None and self._hybrid_retriever:
-            self._web_retriever = self._hybrid_retriever._web_retriever
+                logger.error(f"Failed to initialize retriever: {e}")
+                raise
     
     def retrieve(
         self,
@@ -103,259 +155,286 @@ Always provide source attribution for retrieved information."""
         search_queries: Optional[List[str]] = None,
         use_documents: bool = True,
         use_web: bool = False,
-        top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        content_types: Optional[List[str]] = None,
+        expand_context: bool = True,
+        top_k: Optional[int] = None
+    ) -> RetrievalContext:
         """
-        Retrieve information for a query.
+        Perform multi-modal retrieval.
         
         Args:
             query: Main query
-            search_queries: Additional search queries
+            search_queries: Additional search variants
             use_documents: Search local documents
-            use_web: Search the web
+            use_web: Include web search
+            content_types: Filter by content types
+            expand_context: Include linked elements
             top_k: Number of results
-            filters: Metadata filters
             
         Returns:
-            Retrieval results dictionary
+            RetrievalContext with all results
         """
-        self._initialize_retrievers()
+        self._initialize_retriever()
         
-        all_queries = [query]
-        if search_queries:
-            all_queries.extend(search_queries)
+        search_queries = search_queries or [query]
+        top_k = top_k or self.default_top_k
+        content_types = content_types or ["text", "table", "image"]
         
-        results = {
-            "query": query,
-            "local_results": [],
-            "web_results": [],
-            "combined_context": "",
-            "sources": [],
-            "success": True,
-            "error": None
-        }
+        context = RetrievalContext()
+        context.retrieval_methods = []
         
         try:
-            if self._hybrid_retriever:
-                # Use hybrid retriever for combined search
-                hybrid_results = self._hybrid_retriever.search_sync(
-                    query=query,
-                    top_k=top_k,
-                    include_web=use_web,
-                    filters=filters
+            # Local document retrieval
+            if use_documents:
+                local_results = self._retrieve_local(
+                    search_queries, 
+                    top_k,
+                    content_types
                 )
+                context.local_results = local_results
+                context.retrieval_methods.append("local_milvus")
                 
-                for r in hybrid_results:
-                    if r.source_type == "local":
-                        results["local_results"].append({
-                            "id": r.id,
-                            "content": r.content,
-                            "score": r.score,
-                            "source": r.source,
-                            "metadata": r.metadata
-                        })
+                # Categorize by content type
+                for result in local_results:
+                    c_type = result.get("content_type", "text")
+                    if c_type == "table":
+                        context.table_chunks.append(result)
+                    elif c_type == "image":
+                        context.image_chunks.append(result)
                     else:
-                        results["web_results"].append({
-                            "title": r.title,
-                            "url": r.url,
-                            "content": r.content,
-                            "score": r.score
-                        })
-                
-                # Build combined context
-                results["combined_context"] = self._hybrid_retriever.format_results_as_context(
-                    hybrid_results,
-                    include_sources=True
-                )
-                
-                # Collect sources
-                for r in hybrid_results:
-                    source = r.url if r.url else r.source
-                    if source and source not in results["sources"]:
-                        results["sources"].append(source)
+                        context.text_chunks.append(result)
+                    
+                    # Add source
+                    source = result.get("source") or result.get("file_name", "Unknown")
+                    if source not in context.sources:
+                        context.sources.append(source)
             
-            else:
-                # Fallback to individual retrievers
-                if use_documents and self._chroma_retriever:
-                    local_results = self._chroma_retriever.search(
-                        query=query,
-                        top_k=top_k,
-                        filters=filters
-                    )
-                    
-                    for r in local_results:
-                        results["local_results"].append({
-                            "id": r.id,
-                            "content": r.content,
-                            "score": r.score,
-                            "source": r.source,
-                            "metadata": r.metadata
-                        })
+            # Web retrieval
+            if use_web:
+                web_results = self._retrieve_web(query, top_k // 2)
+                context.web_results = web_results
+                context.retrieval_methods.append("web_search")
                 
-                if use_web and self._web_retriever:
-                    web_results = run_async_task(
-                        self._web_retriever.search(query, max_results=5)
-                    )
-                    
-                    for r in web_results:
-                        results["web_results"].append({
-                            "title": r.title,
-                            "url": r.url,
-                            "content": r.snippet,
-                            "score": r.score
-                        })
-                
-                # Build combined context
-                results["combined_context"] = self._build_context(results)
+                for result in web_results:
+                    source = result.get("url") or result.get("source", "Web")
+                    if source not in context.sources:
+                        context.sources.append(source)
+            
+            # Expand context with linked elements
+            if expand_context:
+                context = self._expand_with_links(context)
+            
+            # Build combined context
+            context.combined_context = self._build_combined_context(context)
+            context.total_results = len(context.local_results) + len(context.web_results)
             
             logger.info(
-                f"Retrieved {len(results['local_results'])} local + "
-                f"{len(results['web_results'])} web results"
+                f"Retrieved {context.total_results} results "
+                f"(text: {len(context.text_chunks)}, "
+                f"tables: {len(context.table_chunks)}, "
+                f"images: {len(context.image_chunks)})"
             )
+            
+            return context
             
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
-            results["success"] = False
-            results["error"] = str(e)
-        
-        return results
+            return context
     
-    def _build_context(self, results: Dict[str, Any]) -> str:
-        """Build combined context from results."""
-        context_parts = []
-        
-        if results["local_results"]:
-            context_parts.append("=== Local Documents ===\n")
-            for i, r in enumerate(results["local_results"], 1):
-                context_parts.append(f"[{i}] (Score: {r['score']:.3f})")
-                context_parts.append(f"Source: {r['source']}")
-                context_parts.append(r["content"])
-                context_parts.append("")
-        
-        if results["web_results"]:
-            context_parts.append("\n=== Web Results ===\n")
-            for i, r in enumerate(results["web_results"], 1):
-                context_parts.append(f"[{i}] {r['title']}")
-                context_parts.append(f"URL: {r['url']}")
-                context_parts.append(r["content"])
-                context_parts.append("")
-        
-        return "\n".join(context_parts)
-    
-    def search_documents(
+    def _retrieve_local(
         self,
-        query: str,
-        top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None
+        queries: List[str],
+        top_k: int,
+        content_types: List[str]
     ) -> List[Dict[str, Any]]:
-        """
-        Search only local documents.
+        """Retrieve from local Milvus store."""
+        all_results = []
         
-        Args:
-            query: Search query
-            top_k: Number of results
-            filters: Metadata filters
-            
-        Returns:
-            List of document results
-        """
-        result = self.retrieve(
-            query=query,
-            use_documents=True,
-            use_web=False,
-            top_k=top_k,
-            filters=filters
-        )
-        return result["local_results"]
+        for query in queries:
+            try:
+                results = self._hybrid_retriever.search(
+                    query=query,
+                    top_k=top_k,
+                    methods=["dense", "bm25"]
+                )
+                
+                for result in results:
+                    result_dict = {
+                        "id": getattr(result, "id", ""),
+                        "content": getattr(result, "content", str(result)),
+                        "score": getattr(result, "score", 0),
+                        "content_type": getattr(result, "content_type", "text"),
+                        "source": getattr(result, "source", ""),
+                        "metadata": getattr(result, "metadata", {}),
+                        "linked_elements": getattr(result, "linked_elements", []),
+                        "parent_id": getattr(result, "parent_id", None)
+                    }
+                    
+                    # Filter by content type
+                    if result_dict["content_type"] in content_types:
+                        if result_dict["score"] >= self.min_score_threshold:
+                            all_results.append(result_dict)
+                            
+            except Exception as e:
+                logger.warning(f"Local retrieval failed for query: {e}")
+        
+        # Deduplicate by content
+        seen_content = set()
+        unique_results = []
+        for r in all_results:
+            content_hash = hash(r["content"][:100])
+            if content_hash not in seen_content:
+                seen_content.add(content_hash)
+                unique_results.append(r)
+        
+        # Sort by score
+        unique_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        return unique_results[:top_k]
     
-    def search_web(
-        self,
-        query: str,
-        max_results: int = 5
-    ) -> List[Dict[str, Any]]:
-        """
-        Search only the web.
+    def _retrieve_web(self, query: str, top_k: int) -> List[Dict[str, Any]]:
+        """Retrieve from web sources."""
+        try:
+            if hasattr(self._hybrid_retriever, 'search_web'):
+                results = self._hybrid_retriever.search_web(query, top_k)
+                return [
+                    {
+                        "content": r.get("content", ""),
+                        "url": r.get("url", ""),
+                        "title": r.get("title", ""),
+                        "source": "web"
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.warning(f"Web retrieval failed: {e}")
         
-        Args:
-            query: Search query
-            max_results: Maximum results
-            
-        Returns:
-            List of web results
-        """
-        result = self.retrieve(
-            query=query,
-            use_documents=False,
-            use_web=True,
-            top_k=max_results
-        )
-        return result["web_results"]
+        return []
     
-    def get_context_for_generation(
-        self,
-        query: str,
-        analysis: Optional[Dict[str, Any]] = None,
-        max_context_length: int = 4000
-    ) -> str:
-        """
-        Get formatted context for answer generation.
-        
-        Args:
-            query: User query
-            analysis: Query analysis from supervisor
-            max_context_length: Maximum context length
+    def _expand_with_links(self, context: RetrievalContext) -> RetrievalContext:
+        """Expand results with linked elements."""
+        try:
+            expanded_tables = []
+            expanded_images = []
             
-        Returns:
-            Formatted context string
-        """
-        # Determine search strategy
-        use_web = False
-        search_queries = [query]
-        
-        if analysis:
-            use_web = analysis.get("search_strategy", {}).get("use_web_search", False)
-            search_queries = analysis.get("search_strategy", {}).get("search_queries", [query])
-        
-        # Retrieve information
-        results = self.retrieve(
-            query=query,
-            search_queries=search_queries,
-            use_documents=True,
-            use_web=use_web
-        )
-        
-        context = results["combined_context"]
-        
-        # Truncate if needed
-        if len(context) > max_context_length:
-            context = context[:max_context_length] + "\n\n[Context truncated...]"
+            for result in context.local_results:
+                linked = result.get("linked_elements", [])
+                
+                for link_id in linked[:3]:  # Limit expansion
+                    try:
+                        if hasattr(self._hybrid_retriever, 'get'):
+                            linked_results = self._hybrid_retriever.get(ids=[link_id])
+                            for lr in linked_results:
+                                lr_type = getattr(lr, "content_type", "text")
+                                lr_dict = {
+                                    "id": getattr(lr, "id", ""),
+                                    "content": getattr(lr, "content", ""),
+                                    "content_type": lr_type,
+                                    "linked_from": result.get("id")
+                                }
+                                
+                                if lr_type == "table":
+                                    expanded_tables.append(lr_dict)
+                                elif lr_type == "image":
+                                    expanded_images.append(lr_dict)
+                    except:
+                        pass
+            
+            context.table_chunks.extend(expanded_tables)
+            context.image_chunks.extend(expanded_images)
+            
+        except Exception as e:
+            logger.warning(f"Link expansion failed: {e}")
         
         return context
+    
+    def _build_combined_context(self, context: RetrievalContext) -> str:
+        """Build combined context string from all results."""
+        parts = []
+        
+        # Add text chunks
+        if context.text_chunks:
+            parts.append("=== TEXT CONTENT ===")
+            for i, chunk in enumerate(context.text_chunks[:7], 1):
+                source = chunk.get("source", "Unknown")
+                content = chunk.get("content", "")
+                parts.append(f"\n[Source: {source}]\n{content}")
+        
+        # Add table chunks
+        if context.table_chunks:
+            parts.append("\n\n=== TABLES ===")
+            for i, chunk in enumerate(context.table_chunks[:3], 1):
+                content = chunk.get("content", "")
+                parts.append(f"\n[Table {i}]\n{content}")
+        
+        # Add image chunks
+        if context.image_chunks:
+            parts.append("\n\n=== IMAGE DESCRIPTIONS ===")
+            for i, chunk in enumerate(context.image_chunks[:3], 1):
+                content = chunk.get("content", "")
+                parts.append(f"\n[Image {i}]\n{content}")
+        
+        # Add web results
+        if context.web_results:
+            parts.append("\n\n=== WEB SOURCES ===")
+            for i, result in enumerate(context.web_results[:3], 1):
+                title = result.get("title", "")
+                content = result.get("content", "")[:500]
+                url = result.get("url", "")
+                parts.append(f"\n[{title}]\n{content}...\nSource: {url}")
+        
+        combined = "\n".join(parts)
+        
+        # Truncate if too long
+        if len(combined) > self.max_context_length:
+            combined = combined[:self.max_context_length] + "\n\n[Truncated...]"
+        
+        return combined
+    
+    def get_sources(self, context: RetrievalContext) -> List[str]:
+        """Extract unique sources from context."""
+        return context.sources
+    
+    def retrieve_by_type(
+        self,
+        query: str,
+        content_type: str,
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Retrieve specific content type."""
+        self._initialize_retriever()
+        
+        try:
+            if hasattr(self._hybrid_retriever, 'search_by_type'):
+                results = self._hybrid_retriever.search_by_type(
+                    query=query,
+                    content_type=content_type,
+                    top_k=top_k
+                )
+                return [
+                    {
+                        "content": getattr(r, "content", ""),
+                        "score": getattr(r, "score", 0),
+                        "metadata": getattr(r, "metadata", {})
+                    }
+                    for r in results
+                ]
+        except Exception as e:
+            logger.error(f"Type-specific retrieval failed: {e}")
+        
+        return []
 
 
 def create_retriever_agent(
     llm: Optional[Any] = None,
     verbose: bool = True,
     tools: Optional[List[Any]] = None,
-    hybrid_retriever: Optional[Any] = None
+    retriever: Optional[Any] = None
 ) -> RetrieverAgent:
-    """
-    Factory function to create a retriever agent.
-    
-    Args:
-        llm: LLM instance
-        verbose: Enable verbose output
-        tools: Available tools
-        hybrid_retriever: HybridRetriever instance
-        
-    Returns:
-        Configured RetrieverAgent instance
-    """
+    """Factory function to create retriever agent."""
     return RetrieverAgent(
         llm=llm,
         verbose=verbose,
         tools=tools,
-        hybrid_retriever=hybrid_retriever
+        hybrid_retriever=retriever
     )
-

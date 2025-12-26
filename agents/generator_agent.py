@@ -78,21 +78,21 @@ Never fabricate information not present in the context."""
         if self.llm is None:
             try:
                 import os
-                from ..llm import GroqClient, LLMConfig, LLMProvider
+                from ..llm import OpenAIClient, LLMConfig, LLMProvider
                 
-                api_key = os.getenv("GROQ_API_KEY")
+                api_key = os.getenv("OPENAI_API_KEY")
                 if not api_key:
-                    raise ValueError("GROQ_API_KEY not found")
+                    raise ValueError("OPENAI_API_KEY not found")
                 
                 config = LLMConfig(
-                    provider=LLMProvider.GROQ,
-                    model="openai/gpt-oss-120b",
+                    provider=LLMProvider.OPENAI,
+                    model="gpt-4o-mini",
                     api_key=api_key,
-                    temperature=0.2,
-                    max_tokens=2048
+                    temperature=0.3,
+                    max_tokens=4096
                 )
-                self.llm = GroqClient(config)
-                logger.info("Initialized LLM for generator agent")
+                self.llm = OpenAIClient(config)
+                logger.info("Initialized OpenAI LLM for generator agent")
                 
             except Exception as e:
                 logger.error(f"Failed to initialize LLM: {e}")

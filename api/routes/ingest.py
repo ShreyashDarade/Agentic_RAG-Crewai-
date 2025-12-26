@@ -52,10 +52,10 @@ async def ingest_directory(
     This endpoint:
     1. Discovers supported files in the directory
     2. Parses and extracts text content
-    3. Applies OCR if needed
-    4. Chunks the content
-    5. Generates embeddings
-    6. Stores in ChromaDB
+    3. Applies OCR if needed (EasyOCR + spaCy)
+    4. Chunks the content with cross-references
+    5. Generates OpenAI embeddings
+    6. Stores in Milvus Cloud (HNSW index)
     
     Files that have already been ingested are skipped unless force=True.
     """

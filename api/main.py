@@ -1,3 +1,14 @@
+"""
+Multi-Agent RAG API - Production Grade
+
+Features:
+- OpenAI LLM integration
+- Milvus Cloud vector store
+- Advanced retrieval with RRF fusion
+- CrewAI multi-agent orchestration
+- Comprehensive health monitoring
+"""
+
 import logging
 import os
 import sys
@@ -11,12 +22,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
-# Ensure project root is on sys.path for absolute imports
+# Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Ensure CrewAI settings file is local to suppress noisy warnings
+# CrewAI settings
 CREW_SETTINGS_PATH = PROJECT_ROOT / "config" / "crew_settings.json"
 if not os.environ.get("CREWAI_SETTINGS_PATH"):
     CREW_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -41,33 +52,63 @@ _ingestion_pipeline = None
 _start_time = None
 
 
+def validate_environment() -> bool:
+    """Validate required environment variables."""
+    errors = []
+    
+    if not os.getenv("OPENAI_API_KEY"):
+        errors.append("OPENAI_API_KEY is required")
+    
+    if not os.getenv("MILVUS_URI") and not os.getenv("ZILLIZ_URI"):
+        errors.append("MILVUS_URI or ZILLIZ_URI is required for Milvus Cloud")
+    
+    if errors:
+        for error in errors:
+            logger.error(error)
+        return False
+    
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global _crew_manager, _ingestion_pipeline, _start_time
     
-    logger.info("Starting Multi-Agent RAG API...")
+    logger.info("=" * 60)
+    logger.info("Starting Multi-Agent RAG API (Production)")
+    logger.info("=" * 60)
     _start_time = datetime.now()
+    
+    # Validate environment
+    if not validate_environment():
+        logger.error("Environment validation failed - API will start in degraded mode")
     
     # Initialize components
     try:
         from orchestrator import CrewManager
         from data_pipeline import IngestionPipeline
         
-        # Initialize crew manager
+        # Initialize crew manager with OpenAI + Milvus
+        logger.info("Initializing CrewManager...")
         _crew_manager = CrewManager()
         _crew_manager.initialize()
         set_crew_manager(_crew_manager)
-        logger.info("Crew manager initialized")
+        logger.info("✓ CrewManager initialized")
         
         # Initialize ingestion pipeline
+        logger.info("Initializing Ingestion Pipeline...")
         _ingestion_pipeline = IngestionPipeline()
         set_ingestion_pipeline(_ingestion_pipeline)
-        logger.info("Ingestion pipeline initialized")
+        logger.info("✓ Ingestion Pipeline initialized")
+        
+        logger.info("=" * 60)
+        logger.info("API Ready - All components initialized")
+        logger.info("=" * 60)
         
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")
-        # Don't fail startup, allow health check to report issues
+        logger.warning("API starting in degraded mode")
     
     yield
     
@@ -87,20 +128,32 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Multi-Agent RAG API",
         description="""
-        A multi-agent RAG (Retrieval-Augmented Generation) system API.
+        Production-grade Multi-Agent RAG (Retrieval-Augmented Generation) system.
         
-        Features:
-        - Multi-agent query processing with CrewAI
-        - Document ingestion with OCR support
-        - Hybrid retrieval (local + web)
-        - Execution tracing
-        - Conversation memory
+        ## Features
+        
+        - **OpenAI GPT-4o-mini** for LLM
+        - **OpenAI text-embedding-3-small** for embeddings
+        - **Milvus Cloud** with HNSW indexing for vector storage
+        - **EasyOCR** multilingual OCR with spaCy NLP
+        - **Advanced Chunking** with cross-references (text ↔ tables ↔ images)
+        - **RRF Fusion** combining dense + BM25 search
+        - **Cross-encoder Re-ranking** for improved relevance
+        - **MMR Diversity** for varied results
+        - **CrewAI Multi-Agent** orchestration
+        
+        ## Architecture
+        
+        - **Supervisor Agent**: Query analysis and planning
+        - **Retriever Agent**: Multi-modal document retrieval
+        - **Generator Agent**: Context-aware response synthesis
+        - **Feedback Agent**: Response validation and improvement
         
         ## Endpoints
         
         ### Query Processing
-        - `POST /api/v1/agent_query` - Process a query through the multi-agent system
-        - `POST /api/v1/search` - Direct search without full agent pipeline
+        - `POST /api/v1/agent_query` - Process query through multi-agent system
+        - `POST /api/v1/search` - Direct search without agent pipeline
         - `GET /api/v1/trace/{trace_id}` - Get execution trace
         - `GET /api/v1/history` - Get conversation history
         
@@ -109,15 +162,14 @@ def create_app() -> FastAPI:
         - `POST /api/v1/ingest/file` - Ingest a single file
         - `POST /api/v1/ingest/upload` - Upload and ingest a file
         - `GET /api/v1/ingest/status` - Get ingestion status
-        - `GET /api/v1/ingest/files` - List ingested files
         """,
-        version="1.0.0",
+        version="2.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan
     )
     
-    # Add CORS middleware
+    # CORS middleware
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -133,7 +185,6 @@ def create_app() -> FastAPI:
     # Exception handlers
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        """Handle validation errors."""
         errors = []
         for error in exc.errors():
             errors.append({
@@ -153,7 +204,6 @@ def create_app() -> FastAPI:
     
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        """Handle HTTP exceptions."""
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -165,7 +215,6 @@ def create_app() -> FastAPI:
     
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
-        """Handle unexpected exceptions."""
         logger.error(f"Unexpected error: {exc}", exc_info=True)
         
         return JSONResponse(
@@ -178,23 +227,26 @@ def create_app() -> FastAPI:
             }
         )
     
-    # Health check endpoint
+    # Health check
     @app.get(
         "/health",
         response_model=HealthResponse,
         tags=["Health"],
         summary="Health check",
-        description="Check the health status of the API and its components."
+        description="Check API health and component status"
     )
     async def health_check():
-        """Check API health status."""
         components = {}
         overall_status = "healthy"
         
-        # Check LLM
+        # Check LLM (OpenAI)
         try:
             if _crew_manager and _crew_manager._llm:
-                components["llm"] = {"status": "healthy"}
+                components["llm"] = {
+                    "status": "healthy",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini"
+                }
             else:
                 components["llm"] = {"status": "not_initialized"}
                 overall_status = "degraded"
@@ -202,12 +254,14 @@ def create_app() -> FastAPI:
             components["llm"] = {"status": "unhealthy", "error": str(e)}
             overall_status = "unhealthy"
         
-        # Check vector store
+        # Check Vector Store (Milvus Cloud)
         try:
-            if _crew_manager and _crew_manager._hybrid_retriever:
-                doc_count = _crew_manager._hybrid_retriever.local_document_count
+            if _crew_manager and _crew_manager._advanced_retriever:
+                doc_count = _crew_manager._advanced_retriever.document_count
                 components["vector_store"] = {
                     "status": "healthy",
+                    "provider": "milvus_cloud",
+                    "index_type": "HNSW",
                     "document_count": doc_count
                 }
             else:
@@ -216,13 +270,13 @@ def create_app() -> FastAPI:
             components["vector_store"] = {"status": "unhealthy", "error": str(e)}
             overall_status = "unhealthy"
         
-        # Check ingestion pipeline
+        # Check Ingestion Pipeline
         try:
             if _ingestion_pipeline:
                 status = _ingestion_pipeline.get_ingestion_status()
                 components["ingestion"] = {
                     "status": "healthy",
-                    "documents_tracked": status.get("total_documents", 0)
+                    "documents_count": status.get("total_documents", 0)
                 }
             else:
                 components["ingestion"] = {"status": "not_initialized"}
@@ -231,26 +285,33 @@ def create_app() -> FastAPI:
         
         return HealthResponse(
             status=overall_status,
-            version="1.0.0",
+            version="2.0.0",
             components=components
         )
     
     # Root endpoint
     @app.get("/", tags=["Root"])
     async def root():
-        """Root endpoint with API information."""
         return {
             "name": "Multi-Agent RAG API",
-            "version": "1.0.0",
+            "version": "2.0.0",
+            "description": "Production-grade RAG with OpenAI + Milvus Cloud",
             "docs": "/docs",
             "health": "/health",
-            "status": "running"
+            "status": "running",
+            "features": {
+                "llm": "OpenAI GPT-4o-mini",
+                "embeddings": "OpenAI text-embedding-3-small",
+                "vector_store": "Milvus Cloud (HNSW)",
+                "ocr": "EasyOCR + spaCy",
+                "retrieval": "RRF + Re-ranking + MMR",
+                "agents": "CrewAI Multi-Agent"
+            }
         }
     
     # Status endpoint
     @app.get("/status", tags=["Health"])
     async def status():
-        """Get detailed API status."""
         global _start_time
         
         uptime = (datetime.now() - _start_time).total_seconds() if _start_time else 0
@@ -259,17 +320,24 @@ def create_app() -> FastAPI:
             "status": "running",
             "uptime_seconds": uptime,
             "uptime_human": f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m",
+            "environment": os.getenv("APP_ENV", "development"),
         }
         
-        # Add trace stats if available
+        # Add trace stats
         if _crew_manager and _crew_manager._trace_logger:
-            trace_stats = _crew_manager._trace_logger.get_stats()
-            stats["traces"] = trace_stats
+            try:
+                trace_stats = _crew_manager._trace_logger.get_stats()
+                stats["traces"] = trace_stats
+            except:
+                pass
         
-        # Add memory stats if available
+        # Add memory stats
         if _crew_manager and _crew_manager._memory_store:
-            memory_stats = _crew_manager._memory_store.get_stats()
-            stats["memory"] = memory_stats
+            try:
+                memory_stats = _crew_manager._memory_store.get_stats()
+                stats["memory"] = memory_stats
+            except:
+                pass
         
         return stats
     
@@ -290,4 +358,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
-
