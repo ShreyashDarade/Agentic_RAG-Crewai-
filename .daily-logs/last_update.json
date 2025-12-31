@@ -1,6 +1,6 @@
 {
-  "last_updated": "2025-12-30 13:06:40 IST",
-  "run_number": "1",
-  "triggered_by": "workflow_dispatch",
+  "last_updated": "2025-12-31 07:58:01 IST",
+  "run_number": "2",
+  "triggered_by": "schedule",
   "repository": "ShreyashDarade/Agentic_RAG-Crewai"
 }
